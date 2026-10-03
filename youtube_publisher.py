@@ -48,6 +48,11 @@ def get_youtube_service(channel_key: str = "yt_1"):
 _CHANNEL_TITLES = {}
 
 def get_channel_title(service, key: str = "") -> str | None:
+    num = key.replace("yt_", "").replace("yt", "")
+    env_name = os.environ.get(f"YT_NAME_{num}") or os.environ.get(f"YOUTUBE_NAME_{num}")
+    if env_name:
+        return env_name
+
     if key and key in _CHANNEL_TITLES:
         return _CHANNEL_TITLES[key]
     try:
