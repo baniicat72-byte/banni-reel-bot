@@ -77,12 +77,14 @@ def build_all_targets() -> list[dict]:
     targets = []
     
     # 1. YouTube Shorts
-    if youtube_publisher.get_youtube_service():
+    yt_channels = youtube_publisher.get_all_youtube_channels()
+    for ch in yt_channels:
         targets.append({
-            "id": "yt",
-            "name": "YouTube Shorts",
+            "id": ch["id"],
+            "name": ch["name"],
             "icon": "🔴",
-            "type": "youtube"
+            "type": "youtube",
+            "channel_key": ch["id"]
         })
 
     # 2. Meta Targets
@@ -529,19 +531,21 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for t in active_targets:
             # 1. YouTube Shorts
             if t["type"] == "youtube":
+                ch_key = t.get("channel_key", "yt_1")
                 r = youtube_publisher.upload_youtube_short(
                     vpath,
                     content.get("yt_title", "Shorts"),
                     content.get("yt_description", ""),
                     content.get("yt_tags", []),
                     sched_iso,
-                    made_for_kids=s["made_for_kids"]
+                    made_for_kids=s["made_for_kids"],
+                    channel_key=ch_key
                 )
                 if r.get("success"):
                     status = "Scheduled" if sched_iso else "Published"
-                    results.append(f"• 🔴 <b>YouTube Shorts:</b> ✅ {status} (→ <a href='{r.get('url')}'>Watch Short</a>)")
+                    results.append(f"• 🔴 <b>{t['name']}:</b> ✅ {status} (→ <a href='{r.get('url')}'>Watch Short</a>)")
                 else:
-                    results.append(f"• 🔴 <b>YouTube Shorts:</b> ❌ {clean_error_message(r.get('error', 'Failed'))}")
+                    results.append(f"• 🔴 <b>{t['name']}:</b> ❌ {clean_error_message(r.get('error', 'Failed'))}")
 
             # 2. Facebook Page
             elif t["type"] == "facebook":
