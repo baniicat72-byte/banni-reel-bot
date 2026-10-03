@@ -70,19 +70,24 @@ def get_channel_title(service, key: str = "") -> str | None:
     return None
 
 
+DEFAULT_CHANNEL_NAMES = {
+    "yt_1": "YT: BANNI Tech",
+    "yt_2": "YT: priti sharma",
+    "yt_3": "YT: life Goals booster",
+    "yt_4": "YT: DarkVibes",
+}
+
+
 def get_all_youtube_channels() -> list[dict]:
-    """Returns a list of all authenticated YouTube channels."""
+    """Returns a list of all authenticated YouTube channels with real names."""
     channels = []
-    # Check yt_1 through yt_9
-    for i in range(1, 10):
-        key = f"yt_{i}"
+    for key, real_name in DEFAULT_CHANNEL_NAMES.items():
         service = get_youtube_service(key)
         if service:
-            title = get_channel_title(service, key)
-            display_name = f"YT: {title}" if title else f"YouTube Channel {i}"
+            title = get_channel_title(service, key) or real_name
             channels.append({
                 "id": key,
-                "name": display_name,
+                "name": title,
                 "service": service
             })
     return channels
