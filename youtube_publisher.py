@@ -59,8 +59,8 @@ def get_channel_title(service) -> str | None:
 def get_all_youtube_channels() -> list[dict]:
     """Returns a list of all authenticated YouTube channels."""
     channels = []
-    # Check yt_1, yt_2, yt_3, yt_4
-    for i in range(1, 5):
+    # Check yt_1 through yt_9
+    for i in range(1, 10):
         key = f"yt_{i}"
         service = get_youtube_service(key)
         if service:
