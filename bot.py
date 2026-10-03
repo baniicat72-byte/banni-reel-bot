@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 import html
 import time
 import asyncio
@@ -115,6 +116,69 @@ def build_all_targets() -> list[dict]:
     return targets
 
 
+def parse_custom_schedule(text: str) -> tuple[int, str, str] | None:
+    tz = pytz.timezone("Asia/Kolkata")
+    now = datetime.now(tz)
+    text = text.strip().lower()
+
+    # Relative shortcuts: +1h, +2h, +30m, etc.
+    m_rel = re.match(r"^\+(\d+)\s*(h|m|hour|hours|min|mins|minute|minutes)$", text)
+    if m_rel:
+        val = int(m_rel.group(1))
+        unit = m_rel.group(2)
+        delta = timedelta(hours=val) if unit.startswith("h") else timedelta(minutes=val)
+        target = now + delta
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        label = f"⏰ Scheduled: {target.strftime('%d %b %Y, %I:%M %p')} IST"
+        return ts, iso, label
+
+    is_tomorrow = False
+    if "tomorrow" in text or "kal" in text:
+        is_tomorrow = True
+        text = text.replace("tomorrow", "").replace("kal", "").strip()
+
+    formats = [
+        ("%d-%m-%Y %H:%M", False),
+        ("%d/%m/%Y %H:%M", False),
+        ("%Y-%m-%d %H:%M", False),
+        ("%d-%m-%Y %I:%M %p", False),
+        ("%d/%m/%Y %I:%M %p", False),
+        ("%d-%m %H:%M", True),
+        ("%d/%m %H:%M", True),
+        ("%H:%M", True),
+        ("%I:%M %p", True),
+        ("%I:%M%p", True),
+        ("%I%p", True),
+    ]
+
+    target = None
+    for fmt, needs_date in formats:
+        try:
+            dt = datetime.strptime(text, fmt)
+            if needs_date:
+                day = now.day + (1 if is_tomorrow else 0)
+                target = dt.replace(year=now.year, month=now.month, day=day, tzinfo=tz)
+                if not is_tomorrow and target <= now:
+                    target += timedelta(days=1)
+            else:
+                target = dt.replace(tzinfo=tz)
+            break
+        except ValueError:
+            continue
+
+    if not target:
+        return None
+
+    if target < now:
+        target += timedelta(days=1)
+
+    ts = int(target.timestamp())
+    iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    label = f"⏰ Scheduled: {target.strftime('%d %b %Y, %I:%M %p')} IST"
+    return ts, iso, label
+
+
 def parse_schedule_time(timing_mode: str, best_time_str: str) -> tuple[int | None, str | None, str]:
     tz = pytz.timezone("Asia/Kolkata")
     now = datetime.now(tz)
@@ -139,14 +203,44 @@ def parse_schedule_time(timing_mode: str, best_time_str: str) -> tuple[int | Non
         label = f"⏰ AI Peak: {target.strftime('%I:%M %p, %d %b')} IST"
         return ts, iso, label
 
+    elif timing_mode == "+1h":
+        target = now + timedelta(hours=1)
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return ts, iso, f"⏰ +1 Hour: {target.strftime('%I:%M %p')} IST"
+
+    elif timing_mode == "+2h":
+        target = now + timedelta(hours=2)
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return ts, iso, f"⏰ +2 Hours: {target.strftime('%I:%M %p')} IST"
+
+    elif timing_mode == "+4h":
+        target = now + timedelta(hours=4)
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return ts, iso, f"⏰ +4 Hours: {target.strftime('%I:%M %p')} IST"
+
     elif timing_mode == "tonight":
         target = now.replace(hour=20, minute=0, second=0, microsecond=0)
         if target <= now:
             target += timedelta(days=1)
         ts = int(target.timestamp())
         iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-        label = f"🌙 Tonight: {target.strftime('%I:%M %p, %d %b')} IST"
+        label = f"🌙 Tonight 8:00 PM: {target.strftime('%d %b')} IST"
         return ts, iso, label
+
+    elif timing_mode == "tomorrow_morning":
+        target = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return ts, iso, f"☀️ Kal Subah 9:00 AM: {target.strftime('%d %b')} IST"
+
+    elif timing_mode == "tomorrow_night":
+        target = (now + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        ts = int(target.timestamp())
+        iso = target.astimezone(pytz.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return ts, iso, f"🌙 Kal Raat 8:00 PM: {target.strftime('%d %b')} IST"
 
     elif timing_mode == "usa_peak":
         target = now.replace(hour=6, minute=30, second=0, microsecond=0)
@@ -234,9 +328,23 @@ def timing_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚡ Post Immediately (Now)", callback_data="time:now")],
         [InlineKeyboardButton("⏰ AI Best Peak Time",       callback_data="time:ai")],
-        [InlineKeyboardButton("🌙 Tonight 8:00 PM IST",     callback_data="time:tonight")],
-        [InlineKeyboardButton("🇺🇸 USA Peak (6:30 AM IST)",  callback_data="time:usa_peak")],
-        [InlineKeyboardButton("⬅️ Back to Dashboard",       callback_data="act:dashboard")],
+        [
+            InlineKeyboardButton("➕ 1 Hour", callback_data="time:+1h"),
+            InlineKeyboardButton("➕ 2 Hours", callback_data="time:+2h"),
+            InlineKeyboardButton("➕ 4 Hours", callback_data="time:+4h"),
+        ],
+        [
+            InlineKeyboardButton("🌙 Aaj Raat 8:00 PM", callback_data="time:tonight"),
+            InlineKeyboardButton("☀️ Kal Subah 9:00 AM", callback_data="time:tomorrow_morning"),
+        ],
+        [
+            InlineKeyboardButton("🌙 Kal Raat 8:00 PM", callback_data="time:tomorrow_night"),
+            InlineKeyboardButton("🇺🇸 USA Peak (6:30 AM)", callback_data="time:usa_peak"),
+        ],
+        [
+            InlineKeyboardButton("✍️ 📅 Type Custom Date & Time", callback_data="time:custom"),
+        ],
+        [InlineKeyboardButton("⬅️ Back to Dashboard", callback_data="act:dashboard")],
     ])
 
 
@@ -389,6 +497,28 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         c["fb_caption"] = text
         st["edit_field"] = None
         await update.message.reply_text("✅ <b>Instagram & Facebook Caption Update Ho Gaya!</b>", parse_mode="HTML")
+    elif field == "schedule":
+        res = parse_custom_schedule(text)
+        if not res:
+            await update.message.reply_text(
+                "❌ <b>Invalid Date/Time Format!</b>\n\n"
+                "Kripya inme se kisi format me likhein:\n"
+                "• <code>04-10-2026 18:30</code> (Date & Time)\n"
+                "• <code>8:30 pm</code> ya <code>20:00</code> (Aaj ke liye)\n"
+                "• <code>kal 8pm</code> ya <code>tomorrow 10:00</code>\n"
+                "• <code>+2h</code> ya <code>+30m</code>\n\n"
+                "Dobara type karke send karein:",
+                parse_mode="HTML"
+            )
+            return
+
+        ts, iso, label = res
+        st["sched_timestamp"] = ts
+        st["sched_iso"] = iso
+        st["timing_mode"] = "custom"
+        st["timing_label"] = label
+        st["edit_field"] = None
+        await update.message.reply_text(f"✅ <b>Schedule Time Set Ho Gaya!</b>\n{label}", parse_mode="HTML")
 
     dash_text = build_dashboard_text(st)
     await safe_reply_text(update.message, dash_text, reply_markup=dashboard_keyboard())
@@ -439,12 +569,28 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data.startswith("time:"):
         mode = data.split(":", 1)[1]
+        if mode == "custom":
+            st["edit_field"] = "schedule"
+            return await safe_edit_text(
+                query.message,
+                "📅 <b>Custom Date & Time Set Karein:</b>\n\n"
+                "Kripya apna manpasand time chat me type karke send karein:\n\n"
+                "<b>📌 Format Examples:</b>\n"
+                "• <code>04-10-2026 18:30</code> (Date & Time: 24-hr format)\n"
+                "• <code>8:30 pm</code> ya <code>21:00</code> (Aaj ke liye)\n"
+                "• <code>kal 7pm</code> ya <code>tomorrow 11:00</code> (Kal ke liye)\n"
+                "• <code>+2h</code> ya <code>+45m</code> (Abhi se aage ka time)\n\n"
+                "👇 <i>Neeche message box me date/time type karke send karein:</i>",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back / Cancel", callback_data="act:dashboard")]])
+            )
+
         best_t = st.get("content", {}).get("best_time_suggestion", "7:30 PM IST")
         ts, iso, label = parse_schedule_time(mode, best_t)
         st["timing_mode"] = mode
         st["timing_label"] = label
         st["sched_timestamp"] = ts
         st["sched_iso"] = iso
+        st["edit_field"] = None
         dash_text = build_dashboard_text(st)
         return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard())
 
