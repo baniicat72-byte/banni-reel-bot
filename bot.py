@@ -266,20 +266,31 @@ def build_dashboard_text(st: dict) -> str:
     likes_str = "Hidden" if s["hide_likes"] else "Visible"
     comm_str = "ON" if s["allow_comments"] else "OFF"
 
+    has_yt = any(t["type"] == "youtube" for t in targets if t["id"] in selected_ids)
+    has_meta = any(t["type"] in ("facebook", "instagram") for t in targets if t["id"] in selected_ids)
+
     target_lines = []
     for t in targets:
         if t["id"] in selected_ids:
             target_lines.append(f"• {t['icon']} {t['name']}")
 
     if not target_lines:
-        targets_display = "⚠️ <i>Koi platform select nahi hai! 'Choose Platforms' me jaakar select karein.</i>"
+        targets_display = "⚠️ <i>Koi platform select nahi hai! 'Choose Platforms' par click karke select karein.</i>"
     else:
         targets_display = "\n".join(target_lines)
 
-    title_display = c.get("yt_title", "Untitled")
-    caption_display = c.get("ig_caption", "No caption")
+    title_display = c.get("yt_title", "")
+    caption_display = c.get("ig_caption", "") or c.get("fb_caption", "")
     if len(caption_display) > 260:
         caption_display = caption_display[:260] + "..."
+
+    content_section = ""
+    if has_yt:
+        yt_t = title_display if title_display else "<i>(Khaali hai - 'AI se Banayein' ya 'Edit' karein)</i>"
+        content_section += f"📝 <b>YouTube Title:</b>\n<code>{html.escape(yt_t)}</code>\n\n"
+    if has_meta or not has_yt:
+        c_show = caption_display if caption_display else "<i>(Khaali hai - 'AI se Banayein' ya 'Edit' karein)</i>"
+        content_section += f"💬 <b>Caption (FB/IG):</b>\n{c_show}\n\n"
 
     meta_errs = meta_publisher.get_meta_token_errors()
     err_banner = f"\n⚠️ <b>Token Alert:</b> <i>{html.escape(meta_errs[0])}</i>\n" if meta_errs else ""
@@ -287,8 +298,7 @@ def build_dashboard_text(st: dict) -> str:
     return (
         "🎬 <b>VIDEO CONTROL DASHBOARD</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📝 <b>Title (YouTube):</b>\n<code>{html.escape(title_display)}</code>\n\n"
-        f"💬 <b>Caption (FB/IG):</b>\n{html.escape(caption_display)}\n\n"
+        f"{content_section}"
         f"⏰ <b>Timing:</b> <code>{html.escape(timing_label)}</code>\n"
         f"⚙️ <b>Settings:</b> Kids: <code>{kids_str}</code> | Likes: <code>{likes_str}</code> | Comments: <code>{comm_str}</code>\n\n"
         f"🎯 <b>Selected Platforms ({len(target_lines)} of {len(targets)}):</b>\n{targets_display}\n"
@@ -298,9 +308,11 @@ def build_dashboard_text(st: dict) -> str:
     )
 
 
-def dashboard_keyboard() -> InlineKeyboardMarkup:
+def dashboard_keyboard(st: dict = None) -> InlineKeyboardMarkup:
+    ai_label = "🔄 Re-run AI" if (st and st.get("ai_generated")) else "✨ AI se Title & Caption Banayein"
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 CONFIRM & PUBLISH NOW", callback_data="act:publish")],
+        [InlineKeyboardButton(ai_label, callback_data="act:generate_ai")],
         [
             InlineKeyboardButton("✍️ Edit Title / Caption", callback_data="act:edit_menu"),
             InlineKeyboardButton("⏰ Change Timing",      callback_data="act:timing_menu"),
@@ -309,10 +321,7 @@ def dashboard_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🎯 Choose Platforms",    callback_data="act:platforms_menu"),
             InlineKeyboardButton("⚙️ Video Settings",      callback_data="act:settings_menu"),
         ],
-        [
-            InlineKeyboardButton("🔄 Re-run AI",           callback_data="act:regen"),
-            InlineKeyboardButton("❌ Cancel",               callback_data="act:cancel"),
-        ]
+        [InlineKeyboardButton("❌ Cancel",               callback_data="act:cancel")],
     ])
 
 
@@ -348,12 +357,19 @@ def timing_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def platforms_keyboard(targets: list, selected_ids: set) -> InlineKeyboardMarkup:
+def platforms_keyboard(targets: list, selected_ids: set, is_initial: bool = False) -> InlineKeyboardMarkup:
     rows = []
+    # Quick filter shortcuts
+    rows.append([
+        InlineKeyboardButton("🔴 Only YouTube", callback_data="tog:only_yt"),
+        InlineKeyboardButton("📸 Only Instagram", callback_data="tog:only_ig"),
+        InlineKeyboardButton("🔵 Only Facebook", callback_data="tog:only_fb"),
+    ])
+
     # Display 2 buttons per row for compact clean UI
     temp_row = []
     for t in targets:
-        tick = "✅" if t["id"] in selected_ids else "❌"
+        tick = "✅" if t["id"] in selected_ids else "⬜"
         btn = InlineKeyboardButton(f"{tick} {t['icon']} {t['name']}", callback_data=f"tog:{t['id']}")
         temp_row.append(btn)
         if len(temp_row) == 2:
@@ -366,7 +382,12 @@ def platforms_keyboard(targets: list, selected_ids: set) -> InlineKeyboardMarkup
         InlineKeyboardButton("✅ Select ALL", callback_data="tog:all_on"),
         InlineKeyboardButton("❌ Clear ALL",  callback_data="tog:all_off")
     ])
-    rows.append([InlineKeyboardButton("⬅️ Done / Back to Dashboard", callback_data="act:dashboard")])
+
+    if is_initial:
+        rows.append([InlineKeyboardButton("➡️ Aage Badhein / Next (Dashboard) ➡️", callback_data="act:dashboard")])
+    else:
+        rows.append([InlineKeyboardButton("⬅️ Done / Back to Dashboard", callback_data="act:dashboard")])
+
     return InlineKeyboardMarkup(rows)
 
 
@@ -433,28 +454,19 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         fpath = str(config.TEMP_DIR / fname)
         await fobj.download_to_drive(fpath)
 
-        await safe_edit_text(wait, "👁️ <i>Gemini AI video analyze kar raha hai...</i>")
-
-        # Run AI analysis and target fetching in worker threads so asyncio loop never freezes
-        try:
-            content = await asyncio.wait_for(
-                asyncio.to_thread(ai_helper.generate_social_content, prompt, fpath),
-                timeout=45.0
-            )
-        except Exception as ai_err:
-            logger.warning(f"AI generation timed out/failed ({ai_err}), using default metadata")
-            default_caption = f"{prompt}\n\n#reels #shorts #viral #bannitech" if prompt else "Viral Tech Video\n\n#reels #shorts #viral #bannitech"
-            content = {
-                "ig_caption": default_caption,
-                "fb_caption": default_caption,
-                "yt_title": (prompt[:85] if prompt else "Awesome Tech Reel") + " #Shorts",
-                "yt_description": default_caption,
-                "yt_tags": ["shorts", "tech", "viral", "bannitech"],
-                "best_time_suggestion": "7:30 PM IST (Evening Peak)"
-            }
-
         all_targets = await asyncio.to_thread(build_all_targets)
-        selected_ids = {t["id"] for t in all_targets}
+        # Default: Empty set (0 of 10 selected). User selects one-by-one or uses quick buttons!
+        selected_ids = set()
+
+        default_caption = prompt if prompt else ""
+        content = {
+            "ig_caption": default_caption,
+            "fb_caption": default_caption,
+            "yt_title": (prompt[:85] if prompt else "") + (" #Shorts" if prompt else ""),
+            "yt_description": default_caption,
+            "yt_tags": ["shorts", "viral"] if prompt else [],
+            "best_time_suggestion": "7:30 PM IST"
+        }
 
         st = get_user_state(uid)
         st.update({
@@ -468,10 +480,20 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "sched_timestamp": None,
             "sched_iso": None,
             "edit_field": None,
+            "ai_generated": False,
+            "in_initial_flow": True,
         })
 
-        dash_text = build_dashboard_text(st)
-        await safe_edit_text(wait, dash_text, reply_markup=dashboard_keyboard())
+        header_text = (
+            "📹 <b>Video Download Ho Gaya!</b>\n\n"
+            "🎯 <b>Step 1: Kahan-kahan post karna hai? Select karein (0 of 10):</b>\n"
+            "<i>(Neeche buttons par click karke one-by-one chunein, ya Quick buttons use karein)</i>"
+        )
+        await safe_edit_text(
+            wait,
+            header_text,
+            reply_markup=platforms_keyboard(all_targets, selected_ids, is_initial=True)
+        )
     except Exception as e:
         logger.error(f"Error handling video: {e}", exc_info=True)
         await safe_edit_text(wait, f"❌ <b>Error:</b> <code>{html.escape(str(e))}</code>")
@@ -521,7 +543,7 @@ async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ <b>Schedule Time Set Ho Gaya!</b>\n{label}", parse_mode="HTML")
 
     dash_text = build_dashboard_text(st)
-    await safe_reply_text(update.message, dash_text, reply_markup=dashboard_keyboard())
+    await safe_reply_text(update.message, dash_text, reply_markup=dashboard_keyboard(st))
 
 
 async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -534,8 +556,9 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     # ── Dashboard View ──
     if data == "act:dashboard":
         st["edit_field"] = None
+        st["in_initial_flow"] = False
         dash_text = build_dashboard_text(st)
-        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard())
+        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard(st))
 
     # ── Edit Menu ──
     if data == "act:edit_menu":
@@ -592,7 +615,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         st["sched_iso"] = iso
         st["edit_field"] = None
         dash_text = build_dashboard_text(st)
-        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard())
+        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard(st))
 
     # ── Platforms Menu ──
     if data == "act:platforms_menu":
@@ -603,7 +626,7 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return await safe_edit_text(
             query.message,
             f"🎯 <b>Platforms Toggle Karein ({len(selected)} of {len(targets)} Selected):</b>{err_msg}",
-            reply_markup=platforms_keyboard(targets, selected)
+            reply_markup=platforms_keyboard(targets, selected, is_initial=False)
         )
 
     if data.startswith("tog:"):
@@ -615,17 +638,33 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             selected.update(t["id"] for t in targets)
         elif action == "all_off":
             selected.clear()
+        elif action == "only_yt":
+            selected.clear()
+            selected.update(t["id"] for t in targets if t["type"] == "youtube")
+        elif action == "only_ig":
+            selected.clear()
+            selected.update(t["id"] for t in targets if t["type"] == "instagram")
+        elif action == "only_fb":
+            selected.clear()
+            selected.update(t["id"] for t in targets if t["type"] == "facebook")
         else:
             if action in selected:
                 selected.remove(action)
             else:
                 selected.add(action)
 
+        is_initial = st.get("in_initial_flow", False)
+        header_text = (
+            f"🎯 <b>Step 1: Kahan-kahan post karna hai? Select karein ({len(selected)} of {len(targets)}):</b>\n"
+            f"<i>(Neeche buttons par click karke one-by-one chunein, ya Quick buttons use karein)</i>"
+            if is_initial else
+            f"🎯 <b>Platforms Toggle Karein ({len(selected)} of {len(targets)} Selected):</b>"
+        )
         try:
             return await safe_edit_text(
                 query.message,
-                f"🎯 <b>Platforms Toggle Karein ({len(selected)} of {len(targets)} Selected):</b>",
-                reply_markup=platforms_keyboard(targets, selected)
+                header_text,
+                reply_markup=platforms_keyboard(targets, selected, is_initial=is_initial)
             )
         except Exception:
             pass
@@ -656,15 +695,24 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # ── Regenerate AI ──
-    if data == "act:regen":
+    # ── AI Content Generation (On-demand) ──
+    if data in ("act:generate_ai", "act:regen"):
         vp = st.get("video_path")
         if not vp or not os.path.exists(vp):
             return await safe_edit_text(query.message, "⚠️ Video file expired, please resend.")
-        await safe_edit_text(query.message, "🔄 <b>Gemini AI naya viral content bana raha hai...</b>")
-        st["content"] = ai_helper.generate_social_content(st.get("prompt", ""), vp)
+        await safe_edit_text(query.message, "👁️ <b>Gemini AI video analyze karke viral title & caption bana raha hai...</b>")
+        try:
+            content = await asyncio.wait_for(
+                asyncio.to_thread(ai_helper.generate_social_content, st.get("prompt", ""), vp),
+                timeout=45.0
+            )
+            st["content"] = content
+            st["ai_generated"] = True
+        except Exception as ai_err:
+            logger.warning(f"AI generation failed: {ai_err}")
+            await query.message.reply_text(f"⚠️ AI generation error: {ai_err}")
         dash_text = build_dashboard_text(st)
-        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard())
+        return await safe_edit_text(query.message, dash_text, reply_markup=dashboard_keyboard(st))
 
     # ── Cancel ──
     if data == "act:cancel":
