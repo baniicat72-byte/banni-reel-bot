@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+temp_videos/
+*.log
+youtube_token.json
+client_secrets.json
