@@ -5,11 +5,19 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://graph.facebook.com/v20.0"
 
 
+META_ERRORS = []
+
+def get_meta_token_errors() -> list[str]:
+    return list(set(META_ERRORS))
+
+
 def get_all_managed_pages() -> list:
     """
     Fetches ALL Facebook pages + linked Instagram accounts
     PLUS standalone Business Instagram accounts from all configured tokens.
     """
+    global META_ERRORS
+    META_ERRORS.clear()
     items = []
     seen_fb_ids = set()
     seen_ig_ids = set()
@@ -26,6 +34,13 @@ def get_all_managed_pages() -> list:
                 timeout=10
             )
             data = res.json()
+            if "error" in data:
+                err_msg = data["error"].get("message", "")
+                if data["error"].get("code") == 190 or "expired" in err_msg.lower():
+                    META_ERRORS.append("Meta Token expired (Session ended). Please update META_ACCESS_TOKEN.")
+                else:
+                    META_ERRORS.append(f"Meta Error: {err_msg[:60]}")
+                continue
             for item in data.get("data", []):
                 pid = item["id"]
                 if pid in seen_fb_ids:

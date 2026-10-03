@@ -184,6 +184,9 @@ def build_dashboard_text(st: dict) -> str:
     if len(caption_display) > 260:
         caption_display = caption_display[:260] + "..."
 
+    meta_errs = meta_publisher.get_meta_token_errors()
+    err_banner = f"\n⚠️ <b>Token Alert:</b> <i>{html.escape(meta_errs[0])}</i>\n" if meta_errs else ""
+
     return (
         "🎬 <b>VIDEO CONTROL DASHBOARD</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -192,6 +195,7 @@ def build_dashboard_text(st: dict) -> str:
         f"⏰ <b>Timing:</b> <code>{html.escape(timing_label)}</code>\n"
         f"⚙️ <b>Settings:</b> Kids: <code>{kids_str}</code> | Likes: <code>{likes_str}</code> | Comments: <code>{comm_str}</code>\n\n"
         f"🎯 <b>Selected Platforms ({len(target_lines)} of {len(targets)}):</b>\n{targets_display}\n"
+        f"{err_banner}"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "👇 Customize karein ya Confirm karke Publish karein:"
     )
@@ -424,9 +428,11 @@ async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "act:platforms_menu":
         targets = st.get("all_targets", [])
         selected = st.get("selected_target_ids", set())
+        meta_errs = meta_publisher.get_meta_token_errors()
+        err_msg = "\n\n⚠️ <i>Meta Token Expired: FB/IG pages load nahi hue. Naya token update karein.</i>" if meta_errs else ""
         return await safe_edit_text(
             query.message,
-            f"🎯 <b>Platforms Toggle Karein ({len(selected)} of {len(targets)} Selected):</b>",
+            f"🎯 <b>Platforms Toggle Karein ({len(selected)} of {len(targets)} Selected):</b>{err_msg}",
             reply_markup=platforms_keyboard(targets, selected)
         )
 
