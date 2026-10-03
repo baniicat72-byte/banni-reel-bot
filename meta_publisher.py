@@ -42,8 +42,38 @@ def get_all_managed_pages(force_refresh: bool = False) -> list:
             )
             data = res.json()
             if "error" in data:
+                err_code = data["error"].get("code")
                 err_msg = data["error"].get("message", "")
-                if data["error"].get("code") == 190 or "expired" in err_msg.lower():
+                # Check if this token is actually a direct Page Access Token
+                if err_code == 100 or "accounts" in err_msg.lower():
+                    try:
+                        me_res = requests.get(
+                            f"{BASE_URL}/me",
+                            params={"fields": "id,name,instagram_business_account{id,username}", "access_token": token},
+                            timeout=10
+                        ).json()
+                        if "id" in me_res and "name" in me_res and "error" not in me_res:
+                            pid = me_res["id"]
+                            if pid not in seen_fb_ids:
+                                seen_fb_ids.add(pid)
+                                ig = me_res.get("instagram_business_account") or {}
+                                ig_id = ig.get("id")
+                                ig_user = ig.get("username")
+                                if ig_id:
+                                    seen_ig_ids.add(ig_id)
+                                items.append({
+                                    "type": "page",
+                                    "page_id": pid,
+                                    "page_name": me_res["name"],
+                                    "page_token": token,
+                                    "instagram_id": ig_id,
+                                    "instagram_username": ig_user,
+                                })
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error checking direct page token: {e}")
+
+                if err_code == 190 or "expired" in err_msg.lower():
                     META_ERRORS.append("Meta Token expired (Session ended). Please update META_ACCESS_TOKEN.")
                 else:
                     META_ERRORS.append(f"Meta Error: {err_msg[:60]}")
