@@ -588,9 +588,10 @@ class HealthHandler(http.server.SimpleHTTPRequestHandler):
 def start_health_server():
     port = int(os.environ.get("PORT", 10000))
     try:
-        server = socketserver.TCPServer(("", port), HealthHandler)
+        socketserver.TCPServer.allow_reuse_address = True
+        server = socketserver.TCPServer(("0.0.0.0", port), HealthHandler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        logger.info(f"Health check server running on port {port} (Render ready)")
+        logger.info(f"Health check server running on 0.0.0.0:{port} (Render ready)")
     except Exception as e:
         logger.warning(f"Could not start health server: {e}")
 

@@ -15,8 +15,17 @@ def get_youtube_service():
     """
     token_file = config.YOUTUBE_TOKEN_FILE
     if not os.path.exists(token_file):
-        logger.warning(f"YouTube token file not found at {token_file}")
-        return None
+        yt_json = os.environ.get("YOUTUBE_TOKEN_JSON")
+        if yt_json:
+            try:
+                with open(token_file, "w") as f:
+                    f.write(yt_json)
+                logger.info(f"Restored YouTube token from env var to {token_file}")
+            except Exception as e:
+                logger.warning(f"Could not write youtube_token.json: {e}")
+        else:
+            logger.warning(f"YouTube token file not found at {token_file}")
+            return None
 
     try:
         creds = Credentials.from_authorized_user_file(token_file, [
