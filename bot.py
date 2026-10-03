@@ -2,6 +2,7 @@ import os
 import sys
 import html
 import time
+import asyncio
 import threading
 import http.server
 import socketserver
@@ -315,36 +316,57 @@ async def handle_video(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     prompt = msg.caption or ""
-    wait = await msg.reply_text("👁️ <i>Gemini AI video analyze kar raha hai...</i>", parse_mode="HTML")
+    wait = await msg.reply_text("⏳ <i>Video download & processing shuru ho raha hai...</i>", parse_mode="HTML")
 
-    fobj = await ctx.bot.get_file(vobj.file_id)
-    ext = os.path.splitext(getattr(vobj, "file_name", "v.mp4") or "v.mp4")[1] or ".mp4"
-    fname = f"vid_{uid}_{int(datetime.now().timestamp())}{ext}"
-    fpath = str(config.TEMP_DIR / fname)
-    await fobj.download_to_drive(fpath)
+    try:
+        fobj = await ctx.bot.get_file(vobj.file_id)
+        ext = os.path.splitext(getattr(vobj, "file_name", "v.mp4") or "v.mp4")[1] or ".mp4"
+        fname = f"vid_{uid}_{int(datetime.now().timestamp())}{ext}"
+        fpath = str(config.TEMP_DIR / fname)
+        await fobj.download_to_drive(fpath)
 
-    content = ai_helper.generate_social_content(prompt, fpath)
-    all_targets = build_all_targets()
-    
-    # Default: Select ALL targets
-    selected_ids = {t["id"] for t in all_targets}
+        await safe_edit_text(wait, "👁️ <i>Gemini AI video analyze kar raha hai...</i>")
 
-    st = get_user_state(uid)
-    st.update({
-        "video_path": fpath,
-        "content": content,
-        "all_targets": all_targets,
-        "selected_target_ids": selected_ids,
-        "prompt": prompt,
-        "timing_mode": "now",
-        "timing_label": "⚡ Post Immediately (Now)",
-        "sched_timestamp": None,
-        "sched_iso": None,
-        "edit_field": None,
-    })
+        # Run AI analysis and target fetching in worker threads so asyncio loop never freezes
+        try:
+            content = await asyncio.wait_for(
+                asyncio.to_thread(ai_helper.generate_social_content, prompt, fpath),
+                timeout=45.0
+            )
+        except Exception as ai_err:
+            logger.warning(f"AI generation timed out/failed ({ai_err}), using default metadata")
+            default_caption = f"{prompt}\n\n#reels #shorts #viral #bannitech" if prompt else "Viral Tech Video\n\n#reels #shorts #viral #bannitech"
+            content = {
+                "ig_caption": default_caption,
+                "fb_caption": default_caption,
+                "yt_title": (prompt[:85] if prompt else "Awesome Tech Reel") + " #Shorts",
+                "yt_description": default_caption,
+                "yt_tags": ["shorts", "tech", "viral", "bannitech"],
+                "best_time_suggestion": "7:30 PM IST (Evening Peak)"
+            }
 
-    dash_text = build_dashboard_text(st)
-    await safe_edit_text(wait, dash_text, reply_markup=dashboard_keyboard())
+        all_targets = await asyncio.to_thread(build_all_targets)
+        selected_ids = {t["id"] for t in all_targets}
+
+        st = get_user_state(uid)
+        st.update({
+            "video_path": fpath,
+            "content": content,
+            "all_targets": all_targets,
+            "selected_target_ids": selected_ids,
+            "prompt": prompt,
+            "timing_mode": "now",
+            "timing_label": "⚡ Post Immediately (Now)",
+            "sched_timestamp": None,
+            "sched_iso": None,
+            "edit_field": None,
+        })
+
+        dash_text = build_dashboard_text(st)
+        await safe_edit_text(wait, dash_text, reply_markup=dashboard_keyboard())
+    except Exception as e:
+        logger.error(f"Error handling video: {e}", exc_info=True)
+        await safe_edit_text(wait, f"❌ <b>Error:</b> <code>{html.escape(str(e))}</code>")
 
 
 async def handle_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

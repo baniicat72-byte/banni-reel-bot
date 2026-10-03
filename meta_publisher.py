@@ -6,17 +6,24 @@ BASE_URL = "https://graph.facebook.com/v20.0"
 
 
 META_ERRORS = []
+_PAGE_CACHE = None
+_PAGE_CACHE_TIME = 0
 
 def get_meta_token_errors() -> list[str]:
     return list(set(META_ERRORS))
 
 
-def get_all_managed_pages() -> list:
+def get_all_managed_pages(force_refresh: bool = False) -> list:
     """
     Fetches ALL Facebook pages + linked Instagram accounts
     PLUS standalone Business Instagram accounts from all configured tokens.
+    Cached for 120 seconds to prevent slow bot responses.
     """
-    global META_ERRORS
+    global META_ERRORS, _PAGE_CACHE, _PAGE_CACHE_TIME
+    now = time.time()
+    if not force_refresh and _PAGE_CACHE is not None and (now - _PAGE_CACHE_TIME) < 120:
+        return _PAGE_CACHE
+
     META_ERRORS.clear()
     items = []
     seen_fb_ids = set()
@@ -94,6 +101,8 @@ def get_all_managed_pages() -> list:
         except Exception as e:
             logger.error(f"Error fetching business IG accounts: {e}")
 
+    _PAGE_CACHE = items
+    _PAGE_CACHE_TIME = now
     return items
 
 

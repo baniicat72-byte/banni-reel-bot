@@ -45,14 +45,23 @@ def get_youtube_service(channel_key: str = "yt_1"):
         return None
 
 
-def get_channel_title(service) -> str | None:
+_CHANNEL_TITLES = {}
+
+def get_channel_title(service, key: str = "") -> str | None:
+    if key and key in _CHANNEL_TITLES:
+        return _CHANNEL_TITLES[key]
     try:
         res = service.channels().list(mine=True, part="snippet").execute()
         items = res.get("items", [])
         if items:
-            return items[0]["snippet"]["title"]
+            t = items[0]["snippet"]["title"]
+            if key:
+                _CHANNEL_TITLES[key] = t
+            return t
     except Exception:
         pass
+    if key:
+        _CHANNEL_TITLES[key] = None
     return None
 
 
@@ -64,7 +73,7 @@ def get_all_youtube_channels() -> list[dict]:
         key = f"yt_{i}"
         service = get_youtube_service(key)
         if service:
-            title = get_channel_title(service)
+            title = get_channel_title(service, key)
             display_name = f"YT: {title}" if title else f"YouTube Channel {i}"
             channels.append({
                 "id": key,
